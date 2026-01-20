@@ -43,16 +43,16 @@ provider "helm" {
 
 # Route53 hosted zone (replace with your domain)
 data "aws_route53_zone" "selected" {
-  name = "example.com"  # e.g. "example.com."
+  name = var.domain_name  # e.g. "example.com."
 }
 
-# Common tags applied to everything
+# Common tags
 locals {
   common_tags = {
-    Environment = "portfolio-demo"
-    Project     = "aws-eks-portfolio"
+    Environment = "${var.environment}"
+    Project     = "aws-eks-microservice"
     ManagedBy   = "Terraform"
-    Owner       = "Bryan"
+    Owner       = "Cloud-Admin"
   }
 }
 
@@ -124,7 +124,7 @@ module "rds" {
   vpc_id                    = module.vpc.vpc_id
   private_subnet_ids        = module.vpc.private_subnet_ids
   allowed_security_group_ids = [module.ec2_jenkins.security_group_id]  # allow Jenkins to connect for testing
-  password                  = ""  # → random generated
+  password                  = ""  # I suggest pass this within ssm or pipeline for real deployment
 
   tags = local.common_tags
 }
@@ -149,7 +149,7 @@ module "ssm" {
   source = "./modules/ssm"
 
   name        = var.cluster_name
-  db_password = module.rds.master_password  # sensitive
+  db_password = module.rds.master_password  # sensitive I suggest pass this within ssm or pipeline for real deployment
 
   tags = local.common_tags
 }
@@ -158,7 +158,7 @@ module "monitoring" {
   source = "./modules/monitoring"
 
   name                   = var.cluster_name
-  grafana_admin_password = var.grafana_admin_password  # change this!
+  grafana_admin_password = var.grafana_admin_password  # change this! pw for grafana, I suggest pass this within ssm or pipeline for real deployment
   prometheus_retention   = "30d"
   enable_persistence     = true
   ingress_enabled        = true
@@ -175,7 +175,7 @@ module "route53" {
 
   hosted_zone_id    = data.aws_route53_zone.selected.zone_id
   domain_name       = var.domain_name
-  alb_dns_name      = "<replace-with-ingress-lb-dns>"  # ← get from NGINX Ingress or ALB output
+  alb_dns_name      = "<replace-with-ingress-lb-dns>"  # get from NGINX Ingress or ALB output
   alb_zone_id       = "<replace-with-alb-zone-id>"     # e.g. Z35SXDOTRQ7X7K for us-east-1
 
   tags = local.common_tags
