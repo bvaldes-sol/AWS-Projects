@@ -190,3 +190,43 @@ module "cloudwatch" {
 
   tags = local.common_tags
 }
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Ingress ALB
+# ────────────────────────────────────────────────────────────────────────────────
+
+module "aws_load_balancer_controller" {
+  source = "./modules/aws-load-balancer-controller"
+
+  name               = var.cluster_name
+  cluster_name       = module.eks.cluster_id
+  oidc_provider_arn  = module.eks.oidc_provider_arn
+  oidc_issuer_url    = module.eks.cluster_oidc_issuer_url
+  vpc_id             = module.vpc.vpc_id
+
+  tags = local.common_tags
+
+  depends_on = [module.eks]
+}
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Certificate ACM
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+module "acm" {
+  source = "./modules/acm"
+
+  name                      = var.cluster_name
+  domain_name               = "yourdomain.com"               # root domain
+  subject_alternative_names = [
+    "*.yourdomain.com",                                    # wildcard for subdomains
+    "grafana.yourdomain.com",
+    "prometheus.yourdomain.com",
+    "app.yourdomain.com"
+  ]
+  hosted_zone_id            = data.aws_route53_zone.selected.zone_id
+
+  tags = local.common_tags
+}
