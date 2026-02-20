@@ -57,16 +57,23 @@ def main():
             account_id_value = item['accountid']['S']
             key = {'accountid': {'S': account_id_value}}
 
-            current_approvers = item.get('delegated_approvers', {}).get('S', '')
+            current_approvers = item.get('delegated_approvers', {}).get('S', '').strip()
 
-            # Skip items that currently have empty delegated_approvers
+            # Skip if empty
             if not current_approvers:
                 print(f"Skipping accountid {account_id_value} — delegated_approvers is empty")
                 continue
 
-            # Append with colon (no space)
-            separator = ':'
-            updated_approvers = current_approvers + separator + NEW_APPROVER
+            # Split into list of approvers (handles colon separator)
+            existing_approvers = current_approvers.split(':')
+
+            # Skip if already present (exact match)
+            if NEW_APPROVER in existing_approvers:
+                print(f"Skipping accountid {account_id_value} — '{NEW_APPROVER}' already exists")
+                continue
+
+            # Safe to append
+            updated_approvers = current_approvers + ':' + NEW_APPROVER
 
             preview_changes.append({
                 'accountid': account_id_value,
