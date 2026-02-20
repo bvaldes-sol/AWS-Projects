@@ -2,59 +2,64 @@ import boto3
 from botocore.exceptions import ClientError
 
 # === CONFIG ===
-TABLE_NAME     = 'YourActualTableNameHere'   # ← CHANGE THIS
-TARGET_APP_ID  = '123'                       # ← CHANGE THIS (exact match needed!)
-NEW_APPROVER   = 'jane.doe@example.com'      # ← what to append
+TABLE_NAME     = 'YourActualTableNameHere'          # ← CHANGE THIS
+TARGET_APP_ID  = '123'                              # ← CHANGE THIS (exact string match required)
+NEW_APPROVER   = 'jane.doe@example.com'             # ← What to append each time
 
-dynamodb = boto3.client('dynamodb')  # assumes credentials/region are set
+dynamodb = boto3.client('dynamodb')  # Assumes credentials/region are configured
 
-# For dry-run testing
-DRY_RUN = True   # Change to False when ready to apply real updates
+# For safe testing — change to False only when you're ready to apply real changes
+DRY_RUN = True
 
 def main():
     try:
-        # Optional: quick table check
+        # Quick table validation (optional but helpful)
         desc = dynamodb.describe_table(TableName=TABLE_NAME)
         print("Table status:", desc['Table']['TableStatus'])
-        print("Primary key schema:", desc['Table']['KeySchema'])  # ← shows partition/sort keys
+        print("Primary key schema:", desc['Table']['KeySchema'])
 
-        # === Scan with filter (since ApplicationID is NOT the partition key) ===
-        response = dynamodb.scan(
+        # === Use Paginator for scan to handle large result sets automatically ===
+        paginator = dynamodb.get_paginator('scan')
+
+        page_iterator = paginator.paginate(
             TableName=TABLE_NAME,
             FilterExpression='ApplicationID = :app_id',
             ExpressionAttributeValues={
                 ':app_id': {'S': TARGET_APP_ID}
-            }
+            },
+            # Optional: reduce data transfer & RCUs by projecting only needed attributes
+            # ProjectionExpression='accountid, ApplicationID, delegated_approvers',
+            # Optional: control page size
+            # PaginationConfig={'PageSize': 100}
         )
 
-        items = response.get('Items', [])
+        items = []
+        for page in page_iterator:
+            page_items = page.get('Items', [])
+            items.extend(page_items)
+            print(f"  Fetched {len(page_items)} items from this page...")
 
-        # === DEBUG: See what we actually got ===
-        print(f"\nScan returned {len(items)} items (Count: {response.get('Count', 0)})")
-        print(f"Scanned {response.get('ScannedCount', 'N/A')} items total")
+        print(f"\nTotal items found after full pagination: {len(items)}")
+
+        # === Debug: Show structure of results ===
         if items:
-            print("Example item keys:", list(items[0].keys()))
-            print("First item full:", items[0])
+            print("\nExample of first matching item:")
+            print(items[0])
+            print("\nAll attribute names in first item:", list(items[0].keys()))
         else:
-            print("No matches found.")
-            print(f"Filtered on: ApplicationID = '{TARGET_APP_ID}'")
-            print("Possible issues:")
-            print("  - Exact value mismatch (case-sensitive, no extra spaces)")
-            print("  - 'ApplicationID' spelled wrong or different casing?")
-            print("  - No items with that ApplicationID in this table?")
-            print("  - Wrong table name / region?")
+            print("\nNo items matched ApplicationID =", repr(TARGET_APP_ID))
+            print("Possible reasons:")
+            print("  • Value doesn't exist exactly as written (case-sensitive, spaces, etc.)")
+            print("  • Attribute name is not exactly 'ApplicationID'")
+            print("  • Wrong table or region")
             return
 
-        # === Collect previews ===
+        # === Build preview of what would change ===
         preview_changes = []
 
         for item in items:
-            # Primary key is accountid (simple PK)
             account_id_value = item['accountid']['S']
-
-            key = {
-                'accountid': {'S': account_id_value}
-            }
+            key = {'accountid': {'S': account_id_value}}
 
             current_approvers = item.get('delegated_approvers', {}).get('S', '')
             separator = ', ' if current_approvers else ''
@@ -67,20 +72,23 @@ def main():
                 'key': key
             })
 
-        # === Show preview ===
-        print("\n=== PREVIEW OF PROPOSED CHANGES ===")
+        # === Display preview ===
+        print("\n" + "="*50)
+        print("PREVIEW OF PROPOSED CHANGES (dry run)")
+        print("="*50)
+
         if not preview_changes:
             print("No items would be updated.")
         else:
             for change in preview_changes:
                 print(f"accountid: {change['accountid']}")
-                print(f"  Current: '{change['current']}'")
-                print(f"  Would become: '{change['would_become']}'")
+                print(f"  Current delegated_approvers : {repr(change['current'])}")
+                print(f"  Would become              : {repr(change['would_become'])}")
                 print("-" * 60)
 
             print(f"\nTotal items that would be updated: {len(preview_changes)}")
 
-        # === Only apply if not dry-run ===
+        # === Apply changes only if not dry-run ===
         if not DRY_RUN and preview_changes:
             print("\nApplying real updates...")
             for change in preview_changes:
@@ -92,12 +100,13 @@ def main():
                         ':new_val': {'S': change['would_become']}
                     }
                 )
-                print(f"Updated: {change['accountid']}")
-        elif DRY_RUN:
-            print("\nDRY RUN MODE — no changes were made to the database.")
+                print(f"Updated accountid: {change['accountid']}")
+            print("\nAll updates completed.")
+        else:
+            print("\nDRY_RUN is enabled — no changes were made to DynamoDB.")
 
     except ClientError as e:
-        print("AWS Error:", e.response['Error']['Message'])
+        print("AWS DynamoDB Error:", e.response['Error']['Message'])
     except Exception as e:
         print("Unexpected error:", str(e))
 
