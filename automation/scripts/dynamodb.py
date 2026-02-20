@@ -27,9 +27,8 @@ def main():
             ExpressionAttributeValues={
                 ':app_id': {'S': TARGET_APP_ID}
             },
-            # Optional: reduce data transfer & RCUs by projecting only needed attributes
+            # Optional: reduce data transfer & RCUs
             # ProjectionExpression='accountid, ApplicationID, delegated_approvers',
-            # Optional: control page size
             # PaginationConfig={'PageSize': 100}
         )
 
@@ -48,10 +47,7 @@ def main():
             print("\nAll attribute names in first item:", list(items[0].keys()))
         else:
             print("\nNo items matched ApplicationID =", repr(TARGET_APP_ID))
-            print("Possible reasons:")
-            print("  • Value doesn't exist exactly as written (case-sensitive, spaces, etc.)")
-            print("  • Attribute name is not exactly 'ApplicationID'")
-            print("  • Wrong table or region")
+            print("Possible reasons: value mismatch, wrong attr name, wrong table/region")
             return
 
         # === Build preview of what would change ===
@@ -62,7 +58,14 @@ def main():
             key = {'accountid': {'S': account_id_value}}
 
             current_approvers = item.get('delegated_approvers', {}).get('S', '')
-            separator = ', ' if current_approvers else ''
+
+            # Skip items that currently have empty delegated_approvers
+            if not current_approvers:
+                print(f"Skipping accountid {account_id_value} — delegated_approvers is empty")
+                continue
+
+            # Append with colon (no space)
+            separator = ':'
             updated_approvers = current_approvers + separator + NEW_APPROVER
 
             preview_changes.append({
@@ -78,12 +81,12 @@ def main():
         print("="*50)
 
         if not preview_changes:
-            print("No items would be updated.")
+            print("No items would be updated (all matching items had empty delegated_approvers or none matched)")
         else:
             for change in preview_changes:
                 print(f"accountid: {change['accountid']}")
-                print(f"  Current delegated_approvers : {repr(change['current'])}")
-                print(f"  Would become              : {repr(change['would_become'])}")
+                print(f"  Current : {repr(change['current'])}")
+                print(f"  Would become : {repr(change['would_become'])}")
                 print("-" * 60)
 
             print(f"\nTotal items that would be updated: {len(preview_changes)}")
