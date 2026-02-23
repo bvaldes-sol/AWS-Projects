@@ -11,21 +11,22 @@ class DynamoDBAppender:
     - Dry run: previews changes without applying.
     """
     
-    def __init__(self, table_name, filter_attribute, filter_value, target_attribute, new_value, dry_run=True, attr_type='set'):
+    def __init__(self, filter_attr_alias, table_name, filter_attribute, filter_value, target_attribute, new_value, dry_run=True, attr_type='set'):
         """
         Constructor: Sets up the object's data (attributes).
         - self.dynamodb: Boto3 client (shared across methods).
         - Other self.*: Your config params.
         """
-        self.dynamodb = boto3.client('dynamodb')
-        self.table_name = table_name
-        self.filter_attribute = filter_attribute  # e.g., ''
-        self.filter_value = filter_value          # e.g., ''
-        self.target_attribute = target_attribute  # e.g., ''
-        self.new_value = new_value                # e.g., ''
-        self.dry_run = dry_run
-        self.attr_type = attr_type                # 'set' for SS; future: 'string' for colon-separated
-        self.partition_key = ''          # Hardcoded for your table; could param this
+        self.dynamodb          = boto3.client('dynamodb')
+        self.filter_attr_alias = filter_attr_alias
+        self.table_name        = table_name
+        self.filter_attribute  = filter_attribute  # e.g., ''
+        self.filter_value      = filter_value          # e.g., ''
+        self.target_attribute  = target_attribute  # e.g., ''
+        self.new_value         = new_value                # e.g., ''
+        self.dry_run           = dry_run
+        self.attr_type         = attr_type                # 'set' for SS; future: 'string' for colon-separated
+        self.partition_key     = ''          # Hardcoded for your table; could param this
         
         # Quick validation (optional but good practice in OOP)
         if self.attr_type != 'set':
@@ -37,11 +38,14 @@ class DynamoDBAppender:
         
         page_iterator = paginator.paginate(
             TableName=self.table_name,
-            FilterExpression=f'{self.filter_attribute} = :filter_val',
+            FilterExpression=f'{self.filter_attr_alias} = :filter_val',
+            ExpressionAttributeNames={
+                self.filter_attr_alias: self.filter_attribute
+            },
             ExpressionAttributeValues={
                 ':filter_val': {'S': self.filter_value}
             }
-            # Optional: ProjectionExpression=f'{self.partition_key}, {self.filter_attribute}, {self.target_attribute}'
+            # Optional: ProjectionExpression=...
         )
         
         items = []
@@ -54,39 +58,41 @@ class DynamoDBAppender:
         return items
 
     def generate_previews(self, items):
-        """Method: Builds preview changes + handles skips."""
+        """Method: Builds preview changes + handles skips only for duplicates."""
         preview_changes = []
         
         for item in items:
             account_id_value = item[self.partition_key]['S']
             key = {self.partition_key: {'S': account_id_value}}
             
-            # Get current value (for sets: empty list if missing/empty)
-            if self.attr_type == 'set':
-                current_values = item.get(self.target_attribute, {}).get('SS', [])
+            # Get current value (empty list if missing or empty set)
+            current_values = item.get(self.target_attribute, {}).get('SS', [])
             
-            # Skip if empty/missing
-            if not current_values:
-                print(f"Skipping accountid {account_id_value} — {self.target_attribute} is empty/missing")
-                continue
-            
-            # Skip if duplicate
+            # Skip ONLY if the new value is already present
             if self.new_value in current_values:
                 print(f"Skipping accountid {account_id_value} — '{self.new_value}' already exists in {self.target_attribute}")
                 continue
             
-            # Build updated (for preview; actual update uses ADD)
-            if self.attr_type == 'set':
-                updated_values = current_values + [self.new_value]  # List for display (sets have no order)
+            # For preview: show what it will become
+            if not current_values:
+                # Case: initializing the set
+                updated_values = [self.new_value]
+                preview_note = " (initializing set)"
+            else:
+                # Case: appending to existing set
+                updated_values = current_values + [self.new_value]
+                preview_note = ""
             
             preview_changes.append({
                 'accountid': account_id_value,
                 'current': current_values,
                 'would_become': updated_values,
-                'key': key
+                'key': key,
+                'note': preview_note   # optional - just for nicer display
             })
         
         return preview_changes
+
 
     def display_previews(self, preview_changes):
         """Method: Prints the preview."""
@@ -95,12 +101,12 @@ class DynamoDBAppender:
         print("="*50)
         
         if not preview_changes:
-            print("No items would be updated (no matches, all empty/missing, or all duplicates)")
+            print("No items would be updated (no matches or all duplicates)")
         else:
             for change in preview_changes:
                 print(f"accountid: {change['accountid']}")
                 print(f"  Current {self.target_attribute}     : {change['current']}")
-                print(f"  Would become {self.target_attribute}: {change['would_become']}")
+                print(f"  Would become {self.target_attribute}: {change['would_become']}{change.get('note', '')}")
                 print("-" * 60)
             
             print(f"\nTotal items that would be updated: {len(preview_changes)}")
@@ -129,38 +135,33 @@ class DynamoDBAppender:
 
     def run(self):
         """Main method: Orchestrates everything."""
-        try:
-            # Table check
-            desc = self.dynamodb.describe_table(TableName=self.table_name)
-            print("Table status:", desc['Table']['TableStatus'])
-            print("Primary key schema:", desc['Table']['KeySchema'])
-            
-            # Step 1: Scan
-            items = self.scan_items()
-            
-            # Debug: First item if any
-            if items:
-                print("\nExample of first matching item:")
-                print(items[0])
-            
-            # Step 2: Previews
-            preview_changes = self.generate_previews(items)
-            
-            # Step 3: Display
-            self.display_previews(preview_changes)
-            
-            # Step 4: Apply (if not dry run)
-            self.apply_updates(preview_changes)
-        
-        except ClientError as e:
-            print("AWS DynamoDB Error:", e.response['Error']['Message'])
-        except Exception as e:
-            print("Unexpected error:", str(e))
+        # Table check (will raise if table doesn't exist / permissions issue)
+        desc = self.dynamodb.describe_table(TableName=self.table_name)
+        print("Table status:", desc['Table']['TableStatus'])
+        print("Primary key schema:", desc['Table']['KeySchema'])
+    
+        # Step 1: Scan
+        items = self.scan_items()
+    
+        # Debug: First item if any
+        if items:
+            print("\nExample of first matching item:")
+            print(items[0])
+    
+        # Step 2: Previews
+        preview_changes = self.generate_previews(items)
+    
+        # Step 3: Display
+        self.display_previews(preview_changes)
+    
+        # Step 4: Apply (if not dry run)
+        self.apply_updates(preview_changes)
 
 # How to use: Create an instance and run it
 if __name__ == "__main__":
     # Example config (change these)
     appender = DynamoDBAppender(
+        filter_attr_alias='#filter_attribute',
         table_name='YourActualTableNameHere',
         filter_attribute='',  # Or whatever attr to filter on
         filter_value='',                # The value to match
@@ -171,3 +172,4 @@ if __name__ == "__main__":
     )
     
     appender.run()
+
