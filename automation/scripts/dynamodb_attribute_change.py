@@ -74,26 +74,28 @@ class DynamoDBAppender:
             current_set = set(current_values)
             new_set = set(self.new_values)
             
-            # Skip if ALL new values are already present (full duplicates)
+            # Skip if ALL new values are already present (nothing would change)
             if new_set.issubset(current_set):
                 print(f"Skipping accountid {account_id_value} — all new values already exist in {self.target_attribute}")
                 continue
             
-            # Compute unique to-add (for accurate preview)
-            to_add = list(new_set - current_set)
-            
-            # For preview: full updated set (sorted for consistent display)
-            updated_values = sorted(current_set | new_set)
-            
-            # Note for init case
-            preview_note = " (initializing set)" if not current_values else ""
+            # Special case: if currently empty → replace with exactly new_values
+            if not current_values:
+                updated_values = sorted(new_set)  # only the new ones
+                preview_note = " (replacing empty value with new set)"
+                to_add = list(new_set)
+            else:
+                # Normal case: add only what's missing
+                to_add = list(new_set - current_set)
+                updated_values = sorted(current_set | new_set)
+                preview_note = ""
             
             preview_changes.append({
                 'accountid': account_id_value,
                 'current': current_values,
                 'would_become': updated_values,
                 'key': key,
-                'to_add': to_add,  # for update
+                'to_add': to_add,
                 'note': preview_note
             })
         
