@@ -37,19 +37,20 @@ class DynamoDBAppender:
     def scan_items(self):
         """Method: Fetches all matching items with pagination."""
         paginator = self.dynamodb.get_paginator('scan')
-        
+
         page_iterator = paginator.paginate(
             TableName=self.table_name,
-            FilterExpression=f'{self.filter_attr_alias} = :filter_val',
+            FilterExpression=f'{self.filter_attr_alias} = :filter_val AND #isphi = :isphi_true',
             ExpressionAttributeNames={
-                self.filter_attr_alias: self.filter_attribute
+                self.filter_attr_alias: self.filter_attribute,      # e.g. 'ApplicationID'
+                '#isphi': 'isphi_temp'                              # safe alias for the boolean field
             },
             ExpressionAttributeValues={
-                ':filter_val': {'S': self.filter_value}
+                ':filter_val':   {'S': self.filter_value},          # your existing string value
+                ':isphi_true':   {'BOOL': True}                     # boolean true
             }
-            # Optional: ProjectionExpression=f'{self.partition_key}, {self.filter_attribute}, {self.target_attribute}'
-        )
-        
+        )  
+              
         items = []
         for page in page_iterator:
             page_items = page.get('Items', [])
