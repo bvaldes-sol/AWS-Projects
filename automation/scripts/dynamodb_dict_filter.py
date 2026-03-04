@@ -34,13 +34,21 @@ class DynamoDBUpdater:
     def scan_items(self):
         """Method: Fetches all matching items with pagination."""
         paginator = self.dynamodb.get_paginator('scan')
-        
-        # Build dynamic FilterExpression for IN (e.g., #attr IN (:v1, :v2))
-        value_placeholders = [f':v{i}' for i in range(len(self.filter_values))]
-        filter_expr = f'{self.filter_attr_alias} IN ({", ".join(value_placeholders)})'
-        
-        expr_values = {f':v{i}': {'S': val} for i, val in enumerate(self.filter_values)}
-        
+
+        # Build OR contains for substring matching
+        filter_parts = []
+        expr_values = {}
+
+        for i, val in enumerate(self.filter_values):
+            placeholder = f':v{i}'
+            filter_parts.append(f'contains({self.filter_attr_alias}, {placeholder})')
+            expr_values[placeholder] = {'S': val}
+
+        if not filter_parts:
+            raise ValueError("No filter values provided")
+
+        filter_expr = ' OR '.join(filter_parts)  # match ANY substring
+
         page_iterator = paginator.paginate(
             TableName=self.table_name,
             FilterExpression=filter_expr,
@@ -48,15 +56,15 @@ class DynamoDBUpdater:
                 self.filter_attr_alias: self.filter_attribute
             },
             ExpressionAttributeValues=expr_values
-            # Optional: ProjectionExpression=f'{self.partition_key}, {self.filter_attribute}, {self.update_attribute}'
+            # Optional: ProjectionExpression=...
         )
-        
+
         items = []
         for page in page_iterator:
             page_items = page.get('Items', [])
             items.extend(page_items)
             print(f"  Fetched {len(page_items)} items from this page...")
-        
+
         print(f"\nTotal items found after full pagination: {len(items)}")
         return items
 
