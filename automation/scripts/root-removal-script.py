@@ -35,17 +35,23 @@ class RootCredentialRemover:
 
     def _assume_root_session(self) -> boto3.Session:
         """Assume root credentials scoped to delete root credentials."""
-        response = self.sts_client.assume_root(
-            TargetPrincipal=self.account_id,
-            PolicyArns=[{'arn': self.TASK_POLICY_ARN}],
-            DurationSeconds=900  # 15 min should be plenty
-        )
-        creds = response['Credentials']
-        return boto3.Session(
-            aws_access_key_id=creds['AccessKeyId'],
-            aws_secret_access_key=creds['SecretAccessKey'],
-            aws_session_token=creds['SessionToken']
-        )
+        try:
+            response = self.sts_client.assume_root(
+                TargetPrincipal=self.account_id,
+                TaskPolicyArn={'arn': self.TASK_POLICY_ARN},  # <-- This is the required fix: singular TaskPolicyArn as dict
+                DurationSeconds=900
+            )
+            creds = response['Credentials']
+            return boto3.Session(
+                aws_access_key_id=creds['AccessKeyId'],
+                aws_secret_access_key=creds['SecretAccessKey'],
+                aws_session_token=creds['SessionToken']
+            )
+        except ClientError as e:
+            error_info = e.response.get('Error', {})
+            code = error_info.get('Code', 'Unknown')
+            msg = error_info.get('Message', str(e))
+            raise RuntimeError(f"AssumeRoot failed for {self.account_id}: {code} - {msg}") from e
 
     def _log(self, message: str):
         prefix = "(DRY RUN) " if self.dry_run else ""
