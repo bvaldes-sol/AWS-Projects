@@ -21,9 +21,9 @@ class DynamoDBAppender:
         """
         self.dynamodb = boto3.client('dynamodb')
         self.table_name = table_name
-        self.filter_attribute = filter_attribute  # e.g., 'ApplicationID'
+        self.filter_attribute = filter_attribute  # e.g., 'FilterAttr'
         self.filter_value = filter_value          # e.g., '123'
-        self.target_attribute = target_attribute  # e.g., 'country_codes'
+        self.target_attribute = target_attribute  # e.g., 'target_set_attr'
         self.new_values = new_values if isinstance(new_values, list) else [new_values]  # Ensure list
         self.dry_run = dry_run
         self.attr_type = attr_type                # 'set' for SS; future: 'string' for colon-separated
@@ -42,7 +42,7 @@ class DynamoDBAppender:
             TableName=self.table_name,
             FilterExpression=f'{self.filter_attr_alias} = :filter_val AND #isphi = :isphi_true',
             ExpressionAttributeNames={
-                self.filter_attr_alias: self.filter_attribute,      # e.g. 'ApplicationID'
+                self.filter_attr_alias: self.filter_attribute,      # e.g. 'FilterAttr'
                 '#isphi': 'isphi_temp'                              # safe alias for the boolean field
             },
             ExpressionAttributeValues={
@@ -80,7 +80,7 @@ class DynamoDBAppender:
                 print(f"Skipping accountid {account_id_value} — all new values already exist in {self.target_attribute}")
                 continue
             
-            # Special case: if currently empty → replace with exactly new_values
+            # Special case: if currently empty -> replace with exactly new_values
             if not current_values:
                 updated_values = sorted(new_set)  # only the new ones
                 preview_note = " (replacing empty value with new set)"
@@ -170,9 +170,9 @@ if __name__ == "__main__":
     # Example config (change these)
     appender = DynamoDBAppender(
         table_name='YourActualTableNameHere',
-        filter_attribute='ApplicationID',  # Or whatever attr to filter on
+        filter_attribute='FilterAttr',  # Or whatever attr to filter on
         filter_value='123',                # The value to match
-        target_attribute='country_codes',  # The set to append to
+        target_attribute='TargetSetAttr',  # The set to append to
         new_values=['AA', 'BA', 'CA'],     # List of new values (or single str)
         dry_run=True,                      # Safe mode
         attr_type='set'                    # For string sets
